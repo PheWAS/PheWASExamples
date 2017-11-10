@@ -3,7 +3,7 @@ title: "BMI FTO Example PheWAS"
 output: html_document
 ---
 ```{r setup, include=FALSE}
-knitr::opts_knit$set( root.dir = "~/")
+#knitr::opts_knit$set( root.dir = "~/")
 ```
 ##PheWAS R Package
 This Rmd file will walk you through an example single SNP PheWAS. The data we will use today is simulated data, generated to reflect the real pattern of correlation found in the EHR. You have been provided one SNP, rs8050136, which is additively coded. There are three potential covariates included: age, is.male, and bmi. Remember that you can view documentation for the PheWAS package methods and other R functions using ?, e.g. ?phewas. In addition, the vignette contains a walkthrough and is available using vignette("PheWAS-package").
