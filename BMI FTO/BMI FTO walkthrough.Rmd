@@ -55,7 +55,7 @@ data=inner_join(inner_join(covariates,genotypes),phenotypes, by=c("FID"="id"))
 ##Run PheWAS
 Running the PheWAS on a single SNP will not take very long, but we can speed it up using more cores. We will pass phewas the data frame we have merged already, so we need to tell it the names of the columns that contain the phenotypes, genotypes, and covariates. I get the names from the "phenotype" data frame and remove "FID", which is the first element. Note that you can adjust the number of cores as applicable to your system- be sure to play nicely if you are sharing a server!
 ```{r}
-results=phewas(phenotypes=names(phenotypes)[-1], genotypes=c("rs8050136_A"), covariates=c("age", "is.male"), data=data, cores=4)
+results=phewas(phenotypes=names(phenotypes)[-1], genotypes=c("rs8050136_A"), covariates=c("age", "is.male"), data=data, cores=1)
 ```
 
 ##View Our Results
