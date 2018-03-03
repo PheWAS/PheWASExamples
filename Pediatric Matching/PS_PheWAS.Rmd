@@ -1,0 +1,211 @@
+---
+title: "PS Adjusted PheWAS"
+author: "RobertJCarroll"
+date: "September 26, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Set up environment
+Our first step will be to install and load the proper libraries as necessary.
+```{r libraries, echo=FALSE, message=FALSE}
+if(!require(PheWAS)|packageVersion("PheWAS")<'0.12'){
+  if(!require(devtools)){
+    install.packages("devtools")
+    library(devtools)
+  }
+  install_github("PheWAS/PheWAS")
+  library(PheWAS)
+}
+if(!require(glmnet)){
+  install.packages("glmnet")
+  library(glmnet)
+}
+```
+# Set up data
+
+## Load the data
+Next, we need to create some sample data; this may take a moment. It's also possible to load in the existing data from the [PheWASExamples github repo](https://github.com/PheWAS/PheWASExamples). If you have downloaded that repo, one can use the "load_data" block instead.
+```{r create_data, echo=F}
+n=10000
+#Source exposure: 480.12
+baseline=generateExample(n=n,hit="480.12")
+#Outcome Phenotype: 588
+outcome=generateExample(n=n,hit="588")
+#Demo and exposure
+n.exposed=1000
+demo=data.frame(id=1:n, current.age=round(runif(n,min=5,max=17),2),
+                is.female=sample(c(T,F),n,replace=TRUE,prob=c(0.488,0.512)),
+                is.white=sample(c(T,F),n,replace=TRUE,prob=c(0.364,0.636)),
+                exposed=c(rep.int(TRUE,n.exposed),
+                          rep.int(FALSE,n-n.exposed)))
+
+#Setup to align exposures
+baseline.map=baseline$genotypes %>% arrange(-rsEXAMPLE) %>% mutate(new.id=1:n)
+baseline.icd=baseline$id.icd9.count %>% inner_join(baseline.map, by="id") %>% transmute(id=new.id,icd9,count)
+
+outcome.map=outcome$genotypes %>% arrange(-rsEXAMPLE) %>% mutate(new.id=1:n)
+outcome.icd=outcome$id.icd9.count %>% inner_join(outcome.map, by="id") %>% transmute(id=new.id,icd9,count)
+
+#Clean up temporary objects
+rm(baseline.map,outcome.map,baseline,outcome,n.exposed,n)
+```
+
+```{r load_data, echo=F}
+# if(!require(readr)){
+#   install.packages("readr")
+#   library(readr)
+# }
+#baseline.icd=readr::read_csv("path/to/PheWASExamples/Pediatric Matching/baseline.id.icd9.count.csv",as.is=c(F,T,F))
+#outcome.icd=readr::read_csv("path/to/PheWASExamples/Pediatric Matching/outcome.id.icd9.count.csv",as.is=c(F,T,F))
+#demo=readr::read_csv("path/to/PheWASExamples/Pediatric Matching/demographics.csv")
+```
+The demographic data looks like this:
+```{r}
+demo %>% group_by(exposed) %>% summarize(N=n(),
+  `N Female (%)`=sprintf("%d (%.1f%%)",sum(is.female),100*sum(is.female)/N),
+  `Age (SD)`=sprintf("%.1f (%.1f)",mean(current.age),sd(current.age)), 
+  `N White (%)`=sprintf("%d (%.1f%%)",sum(is.white),100*sum(is.white)/N) 
+)
+```
+
+## Normalize age
+We need to normalize our age values for use in the PS creation.
+```{r}
+processed.demo = demo %>% mutate(current.age = (current.age - mean(demo$current.age))/sd(demo$current.age))
+```
+
+## Prepare phecodes
+We need to map our ICD9CM codes to phecodes for PheWAS. Because of the short time windows and importance of catching all events, we will be using a minimum code count of 1. We are also not using exclusions for this analysis- especially important for the baseline as the missingness makes propensity score generation harder.
+```{r phecode_map}
+baseline.phecodes = createPhewasTable(baseline.icd, min.code.count = 1, add.exclusions = FALSE)
+outcome.phecodes = createPhewasTable(outcome.icd, min.code.count = 1, add.exclusions = FALSE)
+```
+Note that if one has individuals with no phecodes, eg, they only had well child ICD9CM codes, those records may be missing from the phecodes objects. One could use a left_join and replace the resulting NAs below to avoid those troubles.
+
+## Merge data
+Combining our data into "baseline" and "outcome" data frames will allow us to build the PS and run the PheWAS, respectively. For an idea of our data frame, we'll print out the first 10 rows and columns.
+```{r merge_data}
+baseline.data = inner_join(processed.demo,baseline.phecodes,by="id")
+outcome.data = inner_join(processed.demo,outcome.phecodes,by="id")
+baseline.data[1:10,1:10]
+```
+
+## Clean up
+We can remove some of these left over objects after we have done any exploration we'd like to do.
+```{r clean_up}
+rm(baseline.icd,baseline.phecodes,outcome.icd,outcome.phecodes,processed.demo)
+```
+
+# Pre-process data
+## Prepare outcome data
+### Select viable outcome phenotypes
+We are going to remove phenotypes from our outcome data frame that have zero or one case. First, create the counts in each column, then select only those with at least two cases.
+```{r prefilter_outcome}
+all.phenotypes <- colSums(outcome.data %>% select(-one_of(names(demo))),na.rm = T)
+outcome.phenotypes <- names(all.phenotypes[all.phenotypes>1])
+rm(all.phenotypes)
+```
+### Select only those columns
+```{r ready_outcome}
+outcome.data = outcome.data %>% select(one_of(c(names(demo),outcome.phenotypes)))
+```
+## Prepare baseline data
+### Select helpful baseline phenotypes
+We need to select 3 digit phecodes with at least one case.
+```{r prefilter_baseline}
+#Select only sums for 3 digit phecodes
+all.covariate.phenotypes <- colSums(baseline.data %>% 
+                                      select(-one_of(names(demo))) %>% 
+                                      select(matches("^[0-9]{3}$")), na.rm = T)
+
+#Remove those with no cases
+baseline.phenotypes <- names(all.covariate.phenotypes[all.covariate.phenotypes>0])
+rm(all.covariate.phenotypes)
+```
+### Select only those columns
+```{r ready_baseline}
+baseline.data = baseline.data %>% select(one_of(c(names(demo),baseline.phenotypes)))
+```
+
+# Create Propensity Score
+## Parameters
+We'll be setting the random seed so we can replicate aany results. In addition, we are choosing an alpha of 0.1, which balances the penalty more towards the ridge regression.
+```{r setup_enet}
+set.seed(10)
+alpha.para <- 0.1
+#Get all but the ID amd exposure status for the baseline data
+data.x <- as.matrix(baseline.data %>% select(-id, -exposed))
+```
+## Fit the penalized regression model
+Next, we generate the model using the glmnet package.
+```{r fit_glmnet}
+glmnet.fit <- cv.glmnet(x=data.x, y=baseline.data$exposed, family="binomial", standardize=TRUE, alpha=alpha.para)
+```
+
+## Generate Propensity Score
+We'll finally create the propensity score using our cross validated fit. We are picking the minimum lambda value from the CV.
+```{r create_PS}
+ps <- predict(glmnet.fit, data.x, s='lambda.min')[,"1"]
+data.ps <- data.frame(id=baseline.data$id, PS=ps)
+outcome.data <- inner_join(data.ps, outcome.data, by='id')
+```
+
+# Perform PheWAS
+## Run analysis
+We are now ready to run our PheWAS. Supplying our identified phenotypes and exposure status, we will adjust by the generated propensity score. Note that this is set to use four cores by default, but more will speed things up. The logistf package is used for the actual regression models- it can be fairly computationally intensive.
+```{r phewas}
+results=phewas_ext(
+  #The outcomes for our association analysis
+  phenotypes=outcome.phenotypes,
+  #Our predictor of interest
+  predictors="exposed",
+  #Our covariate for adjusting our models
+  covariates="PS",
+  #Input data frame
+  data=outcome.data,
+  #We aren't using genotype data, so skip Hardy-Weinberg calculations.
+  additive.genotypes=F,
+  #Use thePML / Firth Regression
+  method="logistf",
+  #We've already done our filtering above for the minimum number of cases.
+  min.records=0, 
+  #Use parallel to run on 4 cores
+  cores = 4)
+```
+
+## Filter phenotypes
+We are doing some post-hoc filtering of congenital anomalies based on phecode groupings and names. We also could have done this ahead of time to save us the computational power
+```{r result_filtering}
+#Using the pheinfo table from PheWAS, find those that meet our non-congenital criteria
+non_congenital_list = PheWAS::pheinfo %>% filter(group!='congenital anomalies',!grepl("congenital",description,ignore.case=T))
+
+filtered.results = results %>% 
+  #Filter out congenital conditions
+  filter(phenotype %in% non_congenital_list$phecode) %>% 
+  #Sort by p-value
+  arrange(p)
+```
+## Plot Results
+Let's take a graphical look at what we found.
+```{r result_plot}
+result.plot=phewasManhattan(
+  #Our filtered results
+  filtered.results,
+  #Annotate anything with p<0.001
+  annotate.level=1e-3,
+  title="PheWAS on Drug Exposure, PS Adjusted",
+  #Add more marks on the y axis
+  y.axis.interval=1, 
+  #Shape the plots according to effect direction
+  OR.direction=T
+  )
+result.plot
+```
+## Show results
+We can also show results in a nice looking datatable.
+```{r datatable_results}
+phewasDT(filtered.results %>% mutate(snp=predictor))
+```
