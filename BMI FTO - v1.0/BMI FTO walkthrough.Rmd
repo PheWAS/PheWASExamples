@@ -20,15 +20,12 @@ if(!require(PheWAS)|packageVersion("PheWAS")<'0.99'){
 }
 if(!require(readr)) {install.packages("readr")} #For faster file loading
 ```
-```{r}
-library(PheWAS)
-```
 
 ##Load data
 There are a number of ways to load data, and we may have a variety of data sources for our analysis. First, we will load our genotype data from our plink raw file. It may be necessary to set or change your working directory (setwd). Alternatively, you can specify the complete path to the file you wish to load. Note that knitr requires us to use a special setup for the working directory above.
 ```{r}
 #setwd("~/")
-genotypes=read_table("exome_fto.raw",head=T) %>% select(FID,rs8050136_A)
+genotypes=read_delim("exome_fto.raw",delim=" ") %>% select(FID,rs8050136_A)
 ```
 We only need to keep the id and snp allele count columns. We can take a quick peek at our data to make sure it is coded properly and see our allele frequencies.
 ```{r}
