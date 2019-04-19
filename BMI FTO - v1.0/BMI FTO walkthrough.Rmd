@@ -25,7 +25,7 @@ if(!require(readr)) {install.packages("readr")} #For faster file loading
 There are a number of ways to load data, and we may have a variety of data sources for our analysis. First, we will load our genotype data from our plink raw file. It may be necessary to set or change your working directory (setwd). Alternatively, you can specify the complete path to the file you wish to load. Note that knitr requires us to use a special setup for the working directory above.
 ```{r}
 #setwd("~/")
-genotypes=read_delim("exome_fto.raw",delim=" ") %>% select(FID,rs8050136_A)
+genotypes=read_delim("exome_chip_fto.raw",delim=" ") %>% transmute(id=FID,rs8050136_A)
 ```
 We only need to keep the id and snp allele count columns. We can take a quick peek at our data to make sure it is coded properly and see our allele frequencies.
 ```{r}
@@ -44,7 +44,7 @@ load("covariates.RData")
 Using the raw format data from plink means our genotype data will be ready to go. We are not going to transform our covariates either, so that leaves us to set up our phenotypes. The below call will use the default minimum code count of 2. This may take a few minutes to complete. Note that we are restricting some phenotypes that are specific to males or females, eg prostate cancer. We also define an aggregate function here, as we are using count data and not dates of occurrence (the preferred input).
 ```{r}
 phenotypes=createPhenotypes(icd_codes, 
-                            id.sex = covariates %>% transmute(id=FID, gender=ifelse(is.male,"M","F")),
+                            id.sex = covariates %>% transmute(id, gender=ifelse(is.male,"M","F")),
                             aggregate.fun = sum)
 ```
 We can actually export this data to a phenotype file that would work with plink if interested. These can be quite large, so we are restricting to a single phenotype here
@@ -53,13 +53,13 @@ plinkPhewasExport(phenotypes %>% select(id, `250.2`),file="plink.pheno")
 ```
 We can pass in these separate data frames we have now loaded directly into the phewas method, but we may want to investigate our data later, so we will merge it ourselves. Note that we need to specify the names of our id columns using the 'by' parameter.
 ```{r}
-data=inner_join(inner_join(covariates,genotypes),phenotypes, by=c("FID"="id"))
+data=inner_join(inner_join(covariates, genotypes),phenotypes)
 ```
 
 ##Run PheWAS
 Running the PheWAS on a single SNP will not take very long, but we can speed it up using more cores. We will pass phewas the data frame we have merged already, so we need to tell it the names of the columns that contain the phenotypes, genotypes, and covariates. I get the names from the "phenotype" data frame and remove "FID", which is the first element. Note that you can adjust the number of cores as applicable to your system- be sure to play nicely if you are sharing a server!
 ```{r}
-results=phewas(phenotypes=names(phenotypes)[-1], genotypes=c("rs8050136_A"), covariates=c("age", "is.male"), data=data, cores=1)
+results=phewas(phenotypes=names(phenotypes)[-1], genotypes=c("rs8050136_A"), covariates=c("age", "is.male"), data=data, cores=4)
 ```
 
 ##View Our Results
@@ -72,7 +72,7 @@ Head gives the top n rows (6 by default), addPhecodeInfo adds the name of the ph
 We can report all associations from the PheWAS with p<1e-6 using the code below. There's also a handy method for creating an easy to use table in your knitted document! One can export the table with write.csv(), enabling it to be read by any spreadsheet software.
 ```{r}
 phewasDT(results %>% rename(phecode=phenotype))
-write.csv(addPhecodeInfo(results) %>% arrange(p) %>% filter(p<1e-6) %>% select(phecode, description, snp, OR, p, n_total, n_cases, n_controls), file="top-results.csv")
+write.csv(addPhecodeInfo(results) %>% arrange(p) %>% filter(p<1e-6) %>% select(phenotype, description, snp, OR, p, n_total, n_cases, n_controls), file="top-results.csv")
 ```
 
 Note that our top results are three phecodes that look very similar. As you may remember, phecodes are hierarchical. We shouldn't be surprised to see the overlap in association here- the cases for each test are largely overlapped.
@@ -85,7 +85,7 @@ phewasManhattan(results)
 
 Try tweaking the plot using parameters, such as 'title'. You can view other options using ?phenotypePlot, ?phenotypeManhattan, and ?phewasManhattan (they all direct to the same place). Remember that most parameters from phenotypePlot can be used in the "higher level" plotting functions as well. 
 ```{r}
-my_plot=phewasManhattan(results, title="My example plot", annotate.angle=0)
+my_plot=phewasManhattan(results, title="My example plot")
 my_plot
 ```
 
@@ -99,19 +99,26 @@ dev.off()
 Note that changing the size and scale of the output plot can affect how it looks. The method ggsave from ggplot2 can be helpful for getting consistent output.
 
 ##Adjusting for BMI (sometimes)
-Let's take a look at the effects of BMI on these associations. The phewas function allows one run sets of associations with an adjustment and one without, in addition to any standard covariates. No need to run the analysis again, but here's how one might do it.
+Let's take a look at the effects of BMI on these associations. The phewas_ext function allows one run sets of associations with defined sets of covariates by providing a list of vectors instead of just one vector of covariates. No need to run the analysis again, but here's how one might do it.
 ```{r eval=FALSE}
-results=phewas(phenotypes=names(phenotypes)[-1], genotypes=c("rs8050136_A"), covariates=list(c("age", "is.male"),c("age", "is.male","bmi")), data=data, cores=4)
+results=phewas_ext(phenotypes=names(phenotypes)[-1], genotypes=c("rs8050136_A"), covariates=list(c("age", "is.male"),c("age", "is.male","BMI")), data=data, cores=4)
+```
+
+##Checking our BMI-adjusted results
+If we want to see what the results look like for a single group of covariates, we will need to filter our results.
+```{r eval=FALSE}
+results_bmi_adjusted = results %>% filter(covariates=='age,is.male,BMI')
+phewasManhattan(results_bmi_adjusted, title="Results adjusted for BMI",y.axis.interval=1)
 ```
 
 ##Phenotypes predicting phenotypes
 What happens if we predict phenotypes with our bmi variable?
 ```{r }
-results_bmi=phewas(phenotypes=names(phenotypes)[-1], predictors = c("bmi"), covariates=c("age", "is.male"), data=data, cores=4, additive.genotypes = F)
+results_bmi=phewas(phenotypes=names(phenotypes)[-1], predictors = c("BMI"), covariates=c("age", "is.male"), data=data, cores=4, additive.genotypes = F)
 ```
 One will often see incredibly strong results in these cases, so don't be surprised! In addition, here's the raw code for creating a browsable data table- easily customized from the above default method phewasDT.
 ```{r}
-DT::datatable(results_bmi %>% addPhecodeInfo() %>% arrange(p) %>% filter(!is.na(p)) %>% transmute(phecode, description, predictor, OR=round(OR,2), p=signif(p,2), n_total, n_cases, n_controls))
+DT::datatable(results_bmi %>% addPhecodeInfo() %>% arrange(p) %>% filter(!is.na(p)) %>% transmute(phenotype, description, predictor, OR=round(OR,2), p=signif(p,2), n_total, n_cases, n_controls))
 ```
 
 
