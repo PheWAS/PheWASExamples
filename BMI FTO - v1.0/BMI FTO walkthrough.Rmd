@@ -31,7 +31,7 @@ We only need to keep the id and snp allele count columns. We can take a quick pe
 ```{r}
 table(genotypes$rs8050136_A)
 ```
-Next, we read our billing code data from a csv file. We specify the data types of the columns as R will want to read ICD9CM codes as numeric values.
+Next, we read our billing code data from a csv file. This file includes the id of the individual, the vocabulary and code for this row (ICD9CM or ICD10CM), and the count of days that code occurred. We specify the data types of the columns as R may want to read ICD9CM codes as numeric values (which can lose trailing and leading zeros).
 ```{r}
 icd_codes=read_csv("icd_codes.csv", col_types="ifci")
 ```
