@@ -12,8 +12,7 @@ This Rmd file will walk you through an example single SNP PheWAS. The data we wi
 We first need to install and load the PheWAS package:
 ```{r, eval=FALSE}
 install.packages("devtools")
-install.packages(c("dplyr","tidyr","ggplot2","MASS","meta","ggrepel","DT")) #May be necessary due to devtools issues
-devtools::install_github("PheWAS/PheWAS")
+devtools::install_github("PheWAS/PheWAS",ref="legacy")
 ```
 ```{r}
 library(PheWAS)
