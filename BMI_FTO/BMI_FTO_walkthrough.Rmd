@@ -11,7 +11,7 @@ This Rmd file will walk you through an example single SNP PheWAS. The data we wi
 ## Install PheWAS
 We first need to install and load the v1.0 PheWAS package:
 ```{r, message=F}
-if(!require(PheWAS)|packageVersion("PheWAS")<'0.99.4'){
+if(!require(PheWAS)||packageVersion("PheWAS")<'0.99.4'){
   if(!require(devtools)){
     install.packages("devtools")
   }
